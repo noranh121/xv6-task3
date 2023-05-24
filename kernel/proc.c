@@ -252,6 +252,12 @@ userinit(void)
   p->state = RUNNABLE;
 
   release(&p->lock);
+
+  // Initialize the FIFO queue
+  queue_head = 0;
+  queue_tail = 0;
+  queue_size = 0;
+
 }
 
 // Grow or shrink user memory by n bytes.

@@ -80,6 +80,44 @@ usertrap(void)
   if(which_dev == 2)
     yield();
 
+  // Handle page fault
+  if((which_dev == 0) && (r_scause == 13 || r_scause == 15)){
+    // Get the faulting address
+    uint64 va = r_stval();
+
+    // Find the page table entry (PTE) for the faulting virtual address
+    pte_t *pte = walk(p->pagetable, va, 0);
+    if (!pte || (*pte & PTE_V) != 0) {
+      panic("usertrap: Invalid page table entry or not a page fault");
+    }
+
+    // Check if the page has been swapped out
+    if (*pte & PTE_PG) {
+      // Allocate a new physical page
+      char *mem = kalloc(); // kalloc or ustack_malloc ???
+      if (mem == 0) {
+        panic("usertrap: Out of memory");
+      }
+
+      // Read the page content from the swap file
+      uint64 swap_offset = PTE2PGOFF(*pte);
+      read_from_swap_file(p, mem, swap_offset);
+
+      // Update the page table entry to mark the page as present and set the physical address
+      *pte = PTE_FLAGS(*pte) | PTE_V | PA2PTE(mem);
+
+      // Free the swap file space occupied by the page
+      remove_from_swap_file(p, swap_offset); // or removeSwapFile(p); ???
+    } else { // TODO
+      // It's a segmentation fault, handle accordingly
+      // ...
+    }
+
+    // Retry the faulting instruction
+    p->trapframe->epc = p->trapframe->epc + 4;
+    return;
+  }
+
   usertrapret();
 }
 
@@ -217,5 +255,39 @@ devintr()
   } else {
     return 0;
   }
+}
+
+
+// Function to swap out a page from physical memory to the swap file
+void swap_out_page(struct proc *p) {
+  // Select a page to swap out (e.g., using LRU algorithm)
+  uint64 va = select_page_to_swap(p); // TODO
+
+  // Find the page table entry (PTE) for the virtual address
+  pte_t *pte = walk(p->pagetable, va, 0);
+  if (!pte || (*pte & PTE_V) == 0) {
+    panic("swap_out_page: Invalid page table entry");
+  }
+
+  // Allocate a new physical page for swapping out
+  char *mem = kalloc(); // kalloc or ustack_malloc ???
+  if (mem == 0) {
+    panic("swap_out_page: Out of memory");
+  }
+
+  // Copy the page content from physical memory to the allocated memory
+  memmove(mem, (char*)PTE2PA(*pte), PGSIZE);
+
+  // Write the page content to the swap file
+  uint64 swap_offset = write_to_swap_file(p, mem); // TODO
+  
+  // Update the page table entry to mark the page as swapped out
+  *pte = (*pte & ~PTE_V) | PTE_PG | swap_offset;
+
+  // Free the physical memory occupied by the swapped-out page
+  kfree(mem); // kfree or ustack_free ???
+
+  // Update the paging metadata
+  p->paging_meta.swap_offset[p->paging_meta.num_swapped_out_pages++] = swap_offset;
 }
 

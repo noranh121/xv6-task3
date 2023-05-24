@@ -81,6 +81,19 @@ struct trapframe {
 
 enum procstate { UNUSED, USED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 
+#define MAX_PSYC_PAGES 16
+#define MAX_TOTAL_PAGES 32
+struct file *swapfile[MAX_PSYC_PAGES];
+int swap_offset[MAX_PSYC_PAGES];
+int queue_head;
+int queue_tail;
+int queue_size;
+
+struct paging_metadata {
+  uint64 swap_offset[MAX_TOTAL_PAGES];  // Array to store the swap offsets of swapped-out pages
+  int num_swapped_out_pages;            // Number of pages currently swapped out
+};
+
 // Per-process state
 struct proc {
   struct spinlock lock;
@@ -106,4 +119,5 @@ struct proc {
   char name[16];               // Process name (debugging)
 
   struct file *swapFile;
+  struct paging_metadata paging_meta;  // Paging metadata for swap in/swap out
 };
