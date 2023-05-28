@@ -76,12 +76,14 @@ usertrap(void)
   if(killed(p))
     exit(-1);
 
+  //////swap in///////
+
   // give up the CPU if this is a timer interrupt.
   if(which_dev == 2)
     yield();
 
   // Handle page fault
-  if((which_dev == 0) && (r_scause == 13 || r_scause == 15)){
+  if((which_dev == 0) && (r_scause() == 13 || r_scause() == 15)){
     // Get the faulting address
     uint64 va = r_stval();
 
@@ -99,16 +101,21 @@ usertrap(void)
         panic("usertrap: Out of memory");
       }
 
-      // Read the page content from the swap file
-      uint64 swap_offset = PTE2PGOFF(*pte);
-      read_from_swap_file(p, mem, swap_offset);
+    // Read the page content from the swap file
+    uint64 swap_offset = *pte & PTE_PG;
+    readFromSwapFile(p, mem, swap_offset, PGSIZE);
+
 
       // Update the page table entry to mark the page as present and set the physical address
       *pte = PTE_FLAGS(*pte) | PTE_V | PA2PTE(mem);
 
       // Free the swap file space occupied by the page
-      remove_from_swap_file(p, swap_offset); // or removeSwapFile(p); ???
+      removeSwapFile(p); // or removeSwapFile(p); ???
+      // Update the FIFO queue variables
+      p->paging_meta.queue_head = (p->paging_meta.queue_head + 1) % MAX_TOTAL_PAGES;
+      p->paging_meta.queue_size--;
     } else { // TODO
+      exit(-1);
       // It's a segmentation fault, handle accordingly
       // ...
     }
@@ -257,6 +264,15 @@ devintr()
   }
 }
 
+// Function to select a page to swap out using FIFO algorithm
+uint64 select_page_to_swap(struct proc *p) {
+  // Get the virtual address of the oldest page in the FIFO queue
+  uint64 va = p->paging_meta.swap_offset[p->paging_meta.queue_head];
+
+  return va;
+}
+
+
 
 // Function to swap out a page from physical memory to the swap file
 void swap_out_page(struct proc *p) {
@@ -279,15 +295,19 @@ void swap_out_page(struct proc *p) {
   memmove(mem, (char*)PTE2PA(*pte), PGSIZE);
 
   // Write the page content to the swap file
-  uint64 swap_offset = write_to_swap_file(p, mem); // TODO
+  uint64 swap_offset = writeToSwapFile(p, mem, p->paging_meta.num_swapped_out_pages * PGSIZE, PGSIZE);
+
   
   // Update the page table entry to mark the page as swapped out
   *pte = (*pte & ~PTE_V) | PTE_PG | swap_offset;
 
   // Free the physical memory occupied by the swapped-out page
   kfree(mem); // kfree or ustack_free ???
+  //ustack_free(mem);
 
   // Update the paging metadata
   p->paging_meta.swap_offset[p->paging_meta.num_swapped_out_pages++] = swap_offset;
+  p->paging_meta. queue_head = (p->paging_meta.queue_head + 1) % MAX_TOTAL_PAGES;
+  p->paging_meta.queue_size--;
 }
 

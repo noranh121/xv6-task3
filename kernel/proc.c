@@ -254,9 +254,9 @@ userinit(void)
   release(&p->lock);
 
   // Initialize the FIFO queue
-  queue_head = 0;
-  queue_tail = 0;
-  queue_size = 0;
+  p->paging_meta.queue_head = 0;
+  p->paging_meta.queue_tail = 0;
+  p->paging_meta.queue_size = 0;
 
 }
 
@@ -293,6 +293,10 @@ fork(void)
   if((np = allocproc()) == 0){
     return -1;
   }
+  // Create and initialize the child's swap file
+  memmove(np->ofile, p->ofile, NOFILE * sizeof(struct file *));  
+  if (createSwapFile(np)<0)
+    return -1;
 
   // Copy user memory from parent to child.
   if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0){
