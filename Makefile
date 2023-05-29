@@ -1,6 +1,11 @@
 K=kernel
 U=user
 
+# new
+ifndef SWAP_ALGO
+SWAP_ALGO := SCFIFO
+endif
+
 OBJS = \
   $K/entry.o \
   $K/start.o \
@@ -62,6 +67,10 @@ CFLAGS += -mcmodel=medany
 CFLAGS += -ffreestanding -fno-common -nostdlib -mno-relax
 CFLAGS += -I.
 CFLAGS += $(shell $(CC) -fno-stack-protector -E -x c /dev/null >/dev/null 2>&1 && echo -fno-stack-protector)
+
+# new
+# Add SWAP_ALGO flag
+CFLAGS += -D SWAP_ALGO=$(SWAP_ALGO)
 
 # Disable PIE when possible (for Ubuntu 16.10 toolchain)
 ifneq ($(shell $(CC) -dumpspecs 2>/dev/null | grep -e '[^f]no-pie'),)

@@ -1,8 +1,5 @@
-// #include "kernel/riscv.h"
-// #include "ustack.h"
-// #include "kernel/param.h"
-// #include "user.h"
-// #include <stdlib.h>
+#include "ustack.h"
+
 
 // static struct Stack stack;
 // typedef struct {
@@ -71,8 +68,6 @@
 //     return buffer != NULL ? (int)(PGSIZE * (((char*)buffer) - (char*)0)) : -1;
 // }
 
-#include "kernel/types.h"
-#include "kernel/riscv.h"
 
 #define MAX_BUFFERS 8
 //#define PGSIZE 4096
