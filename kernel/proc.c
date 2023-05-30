@@ -110,10 +110,12 @@ static struct proc*
 allocproc(void)
 {
   struct proc *p;
-
+  int i = 0;
   for(p = proc; p < &proc[NPROC]; p++) {
     acquire(&p->lock);
     if(p->state == UNUSED) {
+      p->paging_meta.page_counters[i] = 0;
+      i++;
       goto found;
     } else {
       release(&p->lock);
@@ -689,5 +691,39 @@ procdump(void)
       state = "???";
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
+  }
+}
+
+// when a page is accessed the counter is shifted right by one bit 
+// and then the digit 1 is added to the most significant bit. If
+// a page was never accessed, the counter is just shifted right by one bit
+
+void update_page_counters() {
+  struct proc *p;
+
+  // Iterate over processes
+  for (p = proc; p < &proc[NPROC]; p++) {
+    // Check if process is in use
+    if (p->state != UNUSED) {
+      // Update page counters for the process
+      struct paging_metadata *pm = &(p->paging_meta);
+      for (int i = 0; i < MAX_TOTAL_PAGES; i++) {
+        // Check if the page is present in memory
+        if (pm->page_counters[i] != -1) {
+          // Shift the counter right by one bit
+          pm->page_counters[i] >>= 1;
+
+          // Check if the page has been accessed (PTE_A flag)
+          pte_t *pte = walk(p->pagetable, i * PGSIZE, 0);
+          if (pte && (*pte & PTE_A)) {
+            // Set the most significant bit (leftmost bit) of the counter
+            pm->page_counters[i] |= (1 << 31);
+
+            // Clear the PTE_A flag
+            *pte &= ~PTE_A;
+          }
+        }
+      }
+    }
   }
 }

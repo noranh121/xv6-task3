@@ -91,7 +91,7 @@ struct paging_metadata {
   int queue_head;
   int queue_tail;
   int queue_size;
-  int counter; //counter variable to track the frequency of page accesses for each page for NFUA
+  int page_counters[64]; //counter variable to track the frequency of page accesses for each page for NFUA
 };
 
 // Per-process state

@@ -3,7 +3,7 @@ U=user
 
 # new
 ifndef SWAP_ALGO
-SWAP_ALGO := SCFIFO
+SWAP_ALGO := NFUA
 endif
 
 OBJS = \
