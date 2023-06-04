@@ -1,9 +1,9 @@
 K=kernel
 U=user
 
-# new
+##default algo / new
 ifndef SWAP_ALGO
-SWAP_ALGO := NFUA
+SWAP_ALGO ?= SCFIFO
 endif
 
 OBJS = \

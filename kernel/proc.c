@@ -5,6 +5,7 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "limits.h"
 
 struct cpu cpus[NCPU];
 
@@ -116,6 +117,9 @@ allocproc(void)
     if(p->state == UNUSED) {
       p->paging_meta.page_counters[i] = 0;
       i++;
+      for (int j = i; j < MAX_TOTAL_PAGES; j++) {
+        p->paging_meta.countersLAPA[j] = 0xFFFFFFFF;
+      }
       goto found;
     } else {
       release(&p->lock);
@@ -255,11 +259,6 @@ userinit(void)
 
   release(&p->lock);
 
-  // Initialize the FIFO queue
-  p->paging_meta.queue_head = 0;
-  p->paging_meta.queue_tail = 0;
-  p->paging_meta.queue_size = 0;
-
 }
 
 // Grow or shrink user memory by n bytes.
@@ -295,12 +294,9 @@ fork(void)
   if((np = allocproc()) == 0){
     return -1;
   }
-  // Create and initialize the child's swap file
-  memmove(np->ofile, p->ofile, NOFILE * sizeof(struct file *));  
-  if (createSwapFile(np)<0)
-    return -1;
+  // I think swap_out should be called here but to avoid kernel trap its commented out :)
+  //swap_out_page(p);
 
-  // Copy user memory from parent to child.
   if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0){
     freeproc(np);
     release(&np->lock);
@@ -481,6 +477,7 @@ scheduler(void)
       release(&p->lock);
     }
   }
+
 }
 
 // Switch to scheduler.  Must hold only p->lock
@@ -694,6 +691,54 @@ procdump(void)
   }
 }
 
+// Function to select a page to swap out
+uint64 select_page_to_swap(struct proc *p) {
+  #ifdef SWAP_ALGO
+     #if SWAP_ALGO == NFUA
+        return nfua_page_replacement(p);
+    #elif SWAP_ALGO == LAPA
+        return lapa_page_replacement(p);
+    #elif SWAP_ALGO == SCFIFO
+        return scfifo_page_replacement(p);
+    #elif SWAP_ALGO == NONE
+      return 0;
+    #endif
+  #endif
+}
+
+
+// Function to swap out a page from physical memory to the swap file
+void swap_out_page(struct proc *p) {
+  uint64 va = select_page_to_swap(p); // TODO
+  
+  if (va == 0) {
+    return;
+  }
+  pte_t *pte = walk(p->pagetable, va, 0);
+  if (!pte || (*pte & PTE_V) == 0 || (*pte & PTE_PG) != 0) {
+    panic("swap_out_page: Invalid page table entry");
+  }
+
+  char *mem = kalloc(); // kalloc or ustack_malloc ???
+  if (mem == 0) {
+    panic("swap_out_page: Out of memory");
+  }
+
+  memmove(mem, (char*)PTE2PA(*pte), PGSIZE);
+
+  uint64 swap_offset = writeToSwapFile(p, mem, p->paging_meta.num_swapped_out_pages * PGSIZE, PGSIZE);
+
+  
+  // mark the page as swapped out
+  *pte = (*pte & ~PTE_V) | PTE_PG | swap_offset;
+
+  kfree(mem); // kfree or ustack_free ???
+
+  // Update the paging metadata
+  p->paging_meta.swap_offset[p->paging_meta.num_swapped_out_pages++] = swap_offset;
+}
+
+
 // when a page is accessed the counter is shifted right by one bit 
 // and then the digit 1 is added to the most significant bit. If
 // a page was never accessed, the counter is just shifted right by one bit
@@ -701,9 +746,7 @@ procdump(void)
 void update_page_counters() {
   struct proc *p;
 
-  // Iterate over processes
   for (p = proc; p < &proc[NPROC]; p++) {
-    // Check if process is in use
     if (p->state != UNUSED) {
       // Update page counters for the process
       struct paging_metadata *pm = &(p->paging_meta);
@@ -713,7 +756,7 @@ void update_page_counters() {
           // Shift the counter right by one bit
           pm->page_counters[i] >>= 1;
 
-          // Check if the page has been accessed (PTE_A flag)
+          // PTE_A flag - check if the page has been accessed
           pte_t *pte = walk(p->pagetable, i * PGSIZE, 0);
           if (pte && (*pte & PTE_A)) {
             // Set the most significant bit (leftmost bit) of the counter
@@ -726,4 +769,56 @@ void update_page_counters() {
       }
     }
   }
+}
+uint64 nfua_page_replacement(struct proc *p) {
+  update_page_counters();
+  uint64 min_counter = INT_MAX;
+  uint64 min_counter_index = 0;
+
+  for (int i = 0; i < MAX_TOTAL_PAGES; i++) {
+      if (p->paging_meta.page_counters[i] < min_counter) {
+          min_counter = p->paging_meta.page_counters[i];
+          min_counter_index = i;
+      }
+  }
+
+  return min_counter_index;
+}
+
+uint64 scfifo_page_replacement(struct proc *p) {
+  // Find the page with the oldest creation time and PTE_A flag not set
+  uint64 oldest_page = 0;
+
+  for (int i = 0; i < MAX_TOTAL_PAGES; i++) {
+    pte_t *pte = walk(p->pagetable, p->paging_meta.swap_offset[i], 0);
+    if (!pte || ((*pte & PTE_V) != 0) || ((*pte & PTE_A) != 0)) {
+      // Skip pages that are present or have the PTE_A flag set
+      continue;
+    }
+
+    oldest_page = i;
+    break;
+  }
+
+  // Return the swap offset of the selected page
+  return p->paging_meta.swap_offset[oldest_page];
+}
+
+uint64 lapa_page_replacement(struct proc *p) {
+  // Find the page with the smallest number of 1s in the counter
+  uint64 min_counter_page = 0;
+  uint64 min_counter_ones = 64;
+
+  for (int i = 0; i < MAX_TOTAL_PAGES; i++) {
+    if (p->paging_meta.countersLAPA[i] < min_counter_ones) {
+      min_counter_ones = p->paging_meta.countersLAPA[i];
+      min_counter_page = i;
+    }
+  }
+
+  // Reset the counter of the selected page to 0xFFFFFFFF
+  p->paging_meta.countersLAPA[min_counter_page] = 0xFFFFFFFF;
+
+  // Return the swap offset of the selected page
+  return p->paging_meta.swap_offset[min_counter_page];
 }

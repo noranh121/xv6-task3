@@ -76,12 +76,11 @@ usertrap(void)
   if(killed(p))
     exit(-1);
 
-  //////swap in///////
-
   // give up the CPU if this is a timer interrupt.
   if(which_dev == 2)
     yield();
 
+  // new
   // Handle page fault
   if((which_dev == 0) && (r_scause() == 13 || r_scause() == 15)){
     // Get the faulting address
@@ -101,23 +100,26 @@ usertrap(void)
         panic("usertrap: Out of memory");
       }
 
-    // Read the page content from the swap file
-    uint64 swap_offset = *pte & PTE_PG;
-    readFromSwapFile(p, mem, swap_offset, PGSIZE);
-
-
+      // Read the page content from the swap file
+      uint64 swap_offset = *pte & PTE_PG;
+      readFromSwapFile(p, mem, swap_offset, PGSIZE);
       // Update the page table entry to mark the page as present and set the physical address
       *pte = PTE_FLAGS(*pte) | PTE_V | PA2PTE(mem);
 
       // Free the swap file space occupied by the page
-      removeSwapFile(p); // or removeSwapFile(p); ???
-      // Update the FIFO queue variables
-      p->paging_meta.queue_head = (p->paging_meta.queue_head + 1) % MAX_TOTAL_PAGES;
-      p->paging_meta.queue_size--;
-    } else { // TODO
+      removeSwapFile(p);
+      // Update the page counter for the accessed page
+      uint64 accessed_page = swap_offset / PGSIZE;
+      #ifdef SWAP_ALGO
+        #if SWAP_ALGO == NFUA
+          p->paging_meta.page_counters[accessed_page] = 0;
+        #elif SWAP_ALGO == LAPA
+          p->paging_meta.countersLAPA[accessed_page] = 0;
+        #endif
+      #endif
+
+    } else { 
       exit(-1);
-      // It's a segmentation fault, handle accordingly
-      // ...
     }
 
     // Retry the faulting instruction
@@ -264,50 +266,4 @@ devintr()
   }
 }
 
-// Function to select a page to swap out using FIFO algorithm
-uint64 select_page_to_swap(struct proc *p) {
-  // Get the virtual address of the oldest page in the FIFO queue
-  uint64 va = p->paging_meta.swap_offset[p->paging_meta.queue_head];
-
-  return va;
-}
-
-
-
-// Function to swap out a page from physical memory to the swap file
-void swap_out_page(struct proc *p) {
-  // Select a page to swap out (e.g., using LRU algorithm)
-  uint64 va = select_page_to_swap(p); // TODO
-
-  // Find the page table entry (PTE) for the virtual address
-  pte_t *pte = walk(p->pagetable, va, 0);
-  if (!pte || (*pte & PTE_V) == 0) {
-    panic("swap_out_page: Invalid page table entry");
-  }
-
-  // Allocate a new physical page for swapping out
-  char *mem = kalloc(); // kalloc or ustack_malloc ???
-  if (mem == 0) {
-    panic("swap_out_page: Out of memory");
-  }
-
-  // Copy the page content from physical memory to the allocated memory
-  memmove(mem, (char*)PTE2PA(*pte), PGSIZE);
-
-  // Write the page content to the swap file
-  uint64 swap_offset = writeToSwapFile(p, mem, p->paging_meta.num_swapped_out_pages * PGSIZE, PGSIZE);
-
-  
-  // Update the page table entry to mark the page as swapped out
-  *pte = (*pte & ~PTE_V) | PTE_PG | swap_offset;
-
-  // Free the physical memory occupied by the swapped-out page
-  kfree(mem); // kfree or ustack_free ???
-  //ustack_free(mem);
-
-  // Update the paging metadata
-  p->paging_meta.swap_offset[p->paging_meta.num_swapped_out_pages++] = swap_offset;
-  p->paging_meta. queue_head = (p->paging_meta.queue_head + 1) % MAX_TOTAL_PAGES;
-  p->paging_meta.queue_size--;
-}
 

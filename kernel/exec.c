@@ -49,10 +49,16 @@ exec(char *path, char **argv)
   if((pagetable = proc_pagetable(p)) == 0)
     goto bad;
 
-  // Delete the current process's swap file
-  removeSwapFile(p);
 
-  // Free the process's pages in physical memory
+
+  // Delete the current process's swap file
+  //removeSwapFile(p);
+
+  //swap_out before loading - new
+  //swap_out_page(p);
+
+  // Initialize paging metadata - new
+  //memset(&p->paging_meta, 0, sizeof(struct paging_metadata));
 
 
   // Load program into memory.
@@ -125,7 +131,9 @@ exec(char *path, char **argv)
     if(*s == '/')
       last = s+1;
   safestrcpy(p->name, last, sizeof(p->name));
-    
+    //new
+  //swap_out_page(p);
+
   // Commit to the user image.
   oldpagetable = p->pagetable;
   p->pagetable = pagetable;
@@ -143,6 +151,8 @@ exec(char *path, char **argv)
     iunlockput(ip);
     end_op();
   }
+  //new
+  //removeSwapFile(p);
   return -1;
 }
 

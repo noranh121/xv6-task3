@@ -84,15 +84,18 @@ enum procstate { UNUSED, USED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 #define MAX_PSYC_PAGES 16
 #define MAX_TOTAL_PAGES 32
 
-
+// new
 struct paging_metadata {
   uint64 swap_offset[MAX_TOTAL_PAGES];  // Array to store the swap offsets of swapped-out pages
   int num_swapped_out_pages;            // Number of pages currently swapped out
-  int queue_head;
-  int queue_tail;
-  int queue_size;
-  int page_counters[64]; //counter variable to track the frequency of page accesses for each page for NFUA
+  int page_counters[MAX_TOTAL_PAGES]; //counter variable to track the frequency of page accesses for each page for NFUA
+  uint32 countersLAPA[MAX_TOTAL_PAGES]; // LAP+A
 };
+
+uint64 nfua_page_replacement(struct proc *p);
+uint64 lapa_page_replacement(struct proc *p);
+uint64 scfifo_page_replacement(struct proc *p);
+void swap_out_page(struct proc *p);
 
 // Per-process state
 struct proc {
@@ -118,6 +121,7 @@ struct proc {
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
 
+// new
   struct file *swapFile;
   struct paging_metadata paging_meta;  // Paging metadata for swap in/swap out
 };
